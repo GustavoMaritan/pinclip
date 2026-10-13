@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+
+# Notas locais do autor (caminhos da máquina pessoal), fora do repositório público.
+CLAUDE.md
+docs/publishing-plan.md
