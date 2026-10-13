@@ -12,6 +12,8 @@ Press **Super+V**, pick something you copied earlier, and it gets pasted.
 - Keeps **text and images** copied to the clipboard (the last 50 items).
 - **Pinned items (★)** don't count toward the limit and are never removed automatically.
 - Search as you type, navigate with ↑/↓, **Enter** or click pastes, **Delete** removes, **Esc** closes.
+- Works in terminals too: pastes with **Ctrl+Shift+V** in GNOME Terminal, Tilix, Terminator, Konsole, kitty,
+  Alacritty, WezTerm, xfce4-terminal and others.
 - Copying something again moves it back to the top.
 - Skips content flagged by password managers (`x-kde-passwordManagerHint`, used by KeePassXC and others).
 - A single Python file, no pip packages: only what a desktop distro already ships.
@@ -59,7 +61,8 @@ except content marked by password managers. Use the **Clear** button ("Limpar") 
 ## Limitations
 
 - X11 only, as described above.
-- In terminals, auto-paste doesn't work (they use Ctrl+Shift+V). The item is still placed on the clipboard.
+- VS Code's integrated terminal can't be told apart from the editor, so it gets Ctrl+V. The item is still on the
+  clipboard: press Ctrl+Shift+V there. Terminal not recognized? Open an issue with the output of `xprop WM_CLASS`.
 - The interface is currently in Portuguese.
 
 ---
@@ -78,7 +81,7 @@ curl -fsSL https://raw.githubusercontent.com/gustavomaritan/pinclip/main/install
 **Desinstalar:** o mesmo comando com `uninstall.sh`. O histórico fica em `~/.local/share/pinclip`.
 
 - Guarda texto e imagem (50 itens). Os **favoritos (★)** não contam no limite e nunca são apagados automaticamente.
-- Busca, ↑/↓, Enter ou clique cola, Delete remove, Esc fecha.
+- Busca, ↑/↓, Enter ou clique cola, Delete remove, Esc fecha. Nos terminais, cola com Ctrl+Shift+V.
 - **Só X11.** No Ubuntu, escolha "Ubuntu on Xorg" na tela de login.
 - O atalho Super+V é configurado sozinho só no GNOME. Em outros desktops, crie um atalho para `~/.local/bin/pinclip`.
 - **Privacidade:** tudo que é copiado fica salvo sem criptografia em disco, exceto o que vier marcado por

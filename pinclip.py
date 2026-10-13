@@ -27,6 +27,13 @@ HISTORY_FILE = os.path.join(DATA_DIR, "history.json")
 # Gerenciadores de senha (KeePassXC etc.) marcam o conteúdo com este target para não ser salvo.
 SECRET_HINT_TARGET = "x-kde-passwordManagerHint"
 PASTE_DELAY_MS = 150
+# Terminais colam com Ctrl+Shift+V (no Ctrl+V recebem um caractere de controle). Comparado com o WM_CLASS da janela.
+TERMINAL_CLASSES = {
+    "gnome-terminal", "gnome-terminal-server", "kgx", "org.gnome.console", "org.gnome.ptyxis", "tilix", "terminator",
+    "konsole", "kitty", "alacritty", "org.wezfurlong.wezterm", "xfce4-terminal", "mate-terminal", "lxterminal",
+    "qterminal", "terminology", "guake", "tilda", "sakura", "deepin-terminal", "com.raggesilver.blackbox",
+}
+XA_WINDOW = 33
 
 
 class History:
@@ -98,8 +105,12 @@ class History:
         self.save()
 
 
+class XClassHint(ctypes.Structure):
+    _fields_ = [("res_name", ctypes.c_void_p), ("res_class", ctypes.c_void_p)]
+
+
 class XPaster:
-    """Simula Ctrl+V na janela focada via extensão XTest (libXtst)."""
+    """Simula Ctrl+V (ou Ctrl+Shift+V) na janela focada via extensão XTest (libXtst)."""
 
     def __init__(self):
         self.x11 = ctypes.cdll.LoadLibrary("libX11.so.6")
@@ -112,6 +123,17 @@ class XPaster:
         self.x11.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
         self.x11.XFlush.argtypes = [ctypes.c_void_p]
         self.xtst.XTestFakeKeyEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]
+        self.x11.XDefaultRootWindow.restype = ctypes.c_ulong
+        self.x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+        self.x11.XInternAtom.restype = ctypes.c_ulong
+        self.x11.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+        self.x11.XGetWindowProperty.argtypes = [
+            ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_long, ctypes.c_long, ctypes.c_int,
+            ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_void_p),
+        ]
+        self.x11.XGetClassHint.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(XClassHint)]
+        self.x11.XFree.argtypes = [ctypes.c_void_p]
         self.dpy = self.x11.XOpenDisplay(None)
         if not self.dpy:
             raise RuntimeError("Não foi possível abrir o display X11")
@@ -119,10 +141,36 @@ class XPaster:
     def _keycode(self, name):
         return self.x11.XKeysymToKeycode(self.dpy, self.x11.XStringToKeysym(name.encode()))
 
-    def ctrl_v(self):
-        ctrl, v = self._keycode("Control_L"), self._keycode("v")
-        for code, down in ((ctrl, 1), (v, 1), (v, 0), (ctrl, 0)):
-            self.xtst.XTestFakeKeyEvent(self.dpy, code, down, 0)
+    def active_window_class(self):
+        """WM_CLASS (nome e classe, em minúsculas) da janela ativa segundo o gerenciador de janelas."""
+        root = self.x11.XDefaultRootWindow(self.dpy)
+        atom = self.x11.XInternAtom(self.dpy, b"_NET_ACTIVE_WINDOW", False)
+        rtype, fmt, data = ctypes.c_ulong(), ctypes.c_int(), ctypes.c_void_p()
+        count, after = ctypes.c_ulong(), ctypes.c_ulong()
+        self.x11.XGetWindowProperty(
+            self.dpy, root, atom, 0, 1, False, XA_WINDOW,
+            ctypes.byref(rtype), ctypes.byref(fmt), ctypes.byref(count), ctypes.byref(after), ctypes.byref(data),
+        )
+        if not data.value:
+            return ()
+        xid = ctypes.cast(data, ctypes.POINTER(ctypes.c_ulong))[0] if count.value else 0
+        self.x11.XFree(data)
+        hint = XClassHint()
+        if not xid or not self.x11.XGetClassHint(self.dpy, xid, ctypes.byref(hint)):
+            return ()
+        names = []
+        for ptr in (hint.res_name, hint.res_class):
+            if ptr:
+                names.append(ctypes.string_at(ptr).decode(errors="replace").lower())
+                self.x11.XFree(ptr)
+        return tuple(names)
+
+    def paste(self, shift=False):
+        keys = [self._keycode("Control_L")] + ([self._keycode("Shift_L")] if shift else []) + [self._keycode("v")]
+        for code in keys:
+            self.xtst.XTestFakeKeyEvent(self.dpy, code, 1, 0)
+        for code in reversed(keys):
+            self.xtst.XTestFakeKeyEvent(self.dpy, code, 0, 0)
         self.x11.XFlush(self.dpy)
 
 
@@ -260,7 +308,7 @@ class HistoryWindow(Gtk.Window):
     def _paste(self, item):
         self.app.set_clipboard(item)
         self.hide()
-        GLib.timeout_add(PASTE_DELAY_MS, self.app.paster_ctrl_v)
+        GLib.timeout_add(PASTE_DELAY_MS, self.app.paste_into_target)
 
     def popup(self):
         self.search.set_text("")
@@ -286,6 +334,7 @@ class PinclipApp(Gtk.Application):
         self.history = None
         self.window = None
         self.paster = None
+        self.target_class = ()  # WM_CLASS da janela que estava ativa quando o Super+V foi apertado
 
     def do_startup(self):
         Gtk.Application.do_startup(self)
@@ -298,6 +347,9 @@ class PinclipApp(Gtk.Application):
 
     def do_command_line(self, command_line):
         if "--daemon" not in command_line.get_arguments()[1:]:
+            # Anota o destino antes de a janela aparecer; com ela já aberta, a ativa seria ela mesma.
+            if not self.window.get_visible():
+                self.target_class = self.paster.active_window_class()
             self.window.popup()
         return 0
 
@@ -334,8 +386,8 @@ class PinclipApp(Gtk.Application):
         else:
             self.clipboard.set_image(GdkPixbuf.Pixbuf.new_from_file(item["image"]))
 
-    def paster_ctrl_v(self):
-        self.paster.ctrl_v()
+    def paste_into_target(self):
+        self.paster.paste(shift=any(name in TERMINAL_CLASSES for name in self.target_class))
         return GLib.SOURCE_REMOVE
 
 
