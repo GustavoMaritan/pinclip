@@ -5,6 +5,8 @@ Press **Super+V**, pick something you copied earlier, and it gets pasted.
 
 [Português](#português) · [License: MIT](LICENSE)
 
+<p align="center"><img src="docs/screenshot.png" alt="Pinclip window with text, image and pinned items" width="420"></p>
+
 ## Features
 
 - Keeps **text and images** copied to the clipboard (the last 50 items).
